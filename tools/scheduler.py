@@ -1,0 +1,26 @@
+from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.triggers.cron import CronTrigger
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def start_scheduler(job_function):
+    """
+    Start the APScheduler to run the job function every day at 9:15 AM.
+    
+    Args:
+        job_function: The function to execute daily.
+    """
+    scheduler = BlockingScheduler()
+    
+    # Run every day at 8:00 AM
+    trigger = CronTrigger(minute="*/10")
+    
+    scheduler.add_job(job_function, trigger)
+    logger.info("Scheduler started. Job will run daily at 9:00 AM.")
+    
+    try:
+        scheduler.start()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Scheduler stopped.")
