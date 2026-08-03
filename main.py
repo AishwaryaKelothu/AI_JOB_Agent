@@ -4,76 +4,80 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
+from langchain.tools import tool
 
-from tools.tavily_tool import search_jobs
+from tools.tavily_tool import search_jobs, get_all_jobs
 from tools.email_tool import send_email
 from tools.memory import is_duplicate, mark_as_sent
 from tools.scheduler import start_scheduler
+import json
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Setup
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-load_dotenv()
 
+# Load .env
 env_path = Path(__file__).parent / ".env"
-
-print("Current directory:", os.getcwd())
-print("Env path:", env_path)
-print("Env exists:", env_path.exists())
-
-load_dotenv(dotenv_path=env_path)
-
-print("Groq Key:", os.getenv("GROQ_API_KEY"))
-
-client = OpenAI(
-    api_key=os.getenv("GROQ_API_KEY"),
-    base_url="https://api.groq.com/openai/v1"
+from pathlib import Path
+from dotenv import load_dotenv
+import os
+GOOGLE_API_KEY=os.getenv("GOOGLE_API_KEY")
+# Create Gemini LLM
+llm = ChatGoogleGenerativeAI(
+    model="gemini-3.1-flash-lite",
+    google_api_key=GOOGLE_API_KEY,
+    temperature=0
 )
+def analyze_jobs_with_ai(jobs: list) -> dict:
+    """Analyze job postings and return structured JSON."""
 
-# ---------- 4 Fixed Categories ----------
-CATEGORIES = [
-    "Software Engineer Jobs",
-    "Backend Developer Jobs",
-    "AI Engineer Jobs",
-    "Full Stack Developer Jobs",
-]
+    prompt = f"""
+You are an AI Job Extraction Assistant.
 
+Extract the following fields from each job.
 
-def ai_extract_details(title: str, content: str) -> dict:
-    """Use Groq AI to extract structured job details from raw content."""
+Return ONLY valid JSON.
+
+Schema:
+
+{{
+  "jobs": [
+    {{
+      "title": "",
+      "company": "",
+      "location": "",
+      "experience": "",
+      "salary": "",
+      "matching_skills": [],
+      "missing_skills": [],
+      "match_score": 0,
+      "apply_url": ""
+    }}
+  ]
+}}
+
+If any field is unavailable, return "Not specified".
+
+Jobs:
+
+{json.dumps(jobs, indent=2)}
+"""
+
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            temperature=0.0,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Extract job details from the given text. "
-                        "Return ONLY a valid JSON object with these keys: "
-                        "company, location, experience, salary. "
-                        "If a field is not found, use 'Not specified'. "
-                        "Return ONLY the JSON, no other text."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": f"Title: {title}\nContent: {content}"
-                }
-            ]
-        )
-        raw = response.choices[0].message.content.strip()
+        response = llm.invoke(prompt)
+
+        raw = response.content.strip()
+
+        # Remove Markdown if Gemini returns it
+        raw = raw.replace("```json", "").replace("```", "").strip()
+
         return json.loads(raw)
+
     except Exception as e:
-        logger.warning(f"AI extraction failed: {e}")
-        return {
-            "company": "Not specified",
-            "location": "Not specified",
-            "experience": "Not specified",
-            "salary": "Not specified"
-        }
-
-
+        logger.error(f"Gemini extraction failed: {e}")
+        return {"jobs": []}
+    
 def build_report(jobs: list) -> str:
     """Build a clean, fixed-format report string using Python (not AI)."""
     lines = []
@@ -84,7 +88,7 @@ def build_report(jobs: list) -> str:
         lines.append(f"Location: {job['location']}")
         lines.append(f"Experience: {job['experience']}")
         lines.append(f"Salary: {job['salary']}")
-        lines.append(f"Apply Link: {job['url']}")
+        lines.append(f"Apply Link: {job['apply_url']}")
         lines.append("")
         lines.append("---------------------------------")
         lines.append("")
@@ -94,36 +98,27 @@ def build_report(jobs: list) -> str:
 
 
 def run_workflow():
-    """Search 4 categories, AI extracts details, Python formats report, email it."""
-    logger.info("Starting daily AI job search...")
 
-    all_jobs = []
+    logger.info("========== JOB SEARCH STARTED ==========")
 
-    # Step 1 — Search each category (1 result each)
-    for category in CATEGORIES:
-        logger.info(f"Searching: {category}")
-        results = search_jobs(category)
-        for job in results:
-            if not is_duplicate(job["url"]):
-                # Step 2 — AI extracts structured details
-                logger.info(f"AI extracting details for: {job['title']}")
-                details = ai_extract_details(job["title"], job["content"])
+    search_query = """give me the list of jobs which are hiring for forward deployed engineer,Ai engineer,software developer"""
+    jobs = get_all_jobs(search_query)
 
-                all_jobs.append({
-                    "title": job["title"],
-                    "url": job["url"],
-                    "company": details.get("company", "Not specified"),
-                    "location": details.get("location", "Not specified"),
-                    "experience": details.get("experience", "Not specified"),
-                    "salary": details.get("salary", "Not specified"),
-                })
+    logger.info(f"Total Jobs Retrieved : {len(jobs)}")
 
-    if not all_jobs:
-        logger.info("No new jobs found today. Skipping email.")
+    if not jobs:
+
+        logger.info("No jobs found.")
+
         return
 
+    result = analyze_jobs_with_ai(jobs)
+
+    jobs = result["jobs"]
+
+
     # Step 3 — Python formats the report (guaranteed clean)
-    report = build_report(all_jobs)
+    report = build_report(jobs)
     logger.info("Report ready!")
 
     # Step 4 — Send email
@@ -132,15 +127,19 @@ def run_workflow():
 
     # Step 5 — Save to memory
     if success:
-        sent_urls = [job["url"] for job in all_jobs]
+        sent_urls = [job["url"] for job in jobs]
         mark_as_sent(sent_urls)
-        logger.info(f"Done! {len(all_jobs)} jobs emailed and saved to memory.")
+        logger.info(f"Done! {len(jobs)} jobs emailed and saved to memory.")
     else:
         logger.error("Email failed. Jobs NOT marked as sent.")
 
 
 if __name__ == "__main__":
-    logger.info("=== AI Job Finder Agent ===")
 
-    # --- PRODUCTION MODE: run daily at 8 AM ---
-    start_scheduler(run_workflow)
+    logger.info("Running once for testing...")
+
+    run_workflow()
+
+    logger.info("Starting scheduler...")
+
+    start_scheduler(run_workflow) 

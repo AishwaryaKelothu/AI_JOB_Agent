@@ -4,6 +4,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 
+user_name = os.getenv("USER_NAME", "User")
+
 
 def send_email(job_report: str) -> bool:
     """
@@ -22,7 +24,7 @@ def send_email(job_report: str) -> bool:
 
     subject = f"Daily Software Engineering Jobs - {datetime.now().strftime('%d/%m/%Y')}"
 
-    body = f"""Good Morning Nauman,
+    body = f"""Good Morning {user_name },
 
 Here are today's Software Engineering jobs.
 

@@ -15,10 +15,10 @@ def start_scheduler(job_function):
     scheduler = BlockingScheduler()
     
     # Run every day at 8:00 AM
-    trigger = CronTrigger(minute="*/10")
+    trigger = CronTrigger(minute="*/2")
     
     scheduler.add_job(job_function, trigger)
-    logger.info("Scheduler started. Job will run daily at 9:00 AM.")
+    logger.info("Scheduler started. Job will run daily at 10:00 AM.")
     
     try:
         scheduler.start()
