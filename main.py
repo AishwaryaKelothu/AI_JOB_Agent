@@ -15,11 +15,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 load_dotenv()
 
-# Groq AI Client
-"""client = OpenAI(
-    api_key=os.getenv("GROQ_API_KEY"),
-    base_url="https://api.groq.com/openai/v1"
-)"""
 env_path = Path(__file__).parent / ".env"
 
 print("Current directory:", os.getcwd())
@@ -29,6 +24,11 @@ print("Env exists:", env_path.exists())
 load_dotenv(dotenv_path=env_path)
 
 print("Groq Key:", os.getenv("GROQ_API_KEY"))
+
+client = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
 
 # ---------- 4 Fixed Categories ----------
 CATEGORIES = [
